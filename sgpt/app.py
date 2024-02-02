@@ -22,6 +22,8 @@ from sgpt.utils import (
     run_command,
 )
 
+import sgpt.handlers.shared_state
+
 
 def main(
     prompt: str = typer.Argument(

@@ -10,6 +10,7 @@ from ..function import get_function
 from ..printer import MarkdownPrinter, Printer, TextPrinter
 from ..role import DefaultRoles, SystemRole
 
+import sgpt.handlers.shared_state
 
 class Handler:
     cache = Cache(int(cfg.get("CACHE_LENGTH")), Path(cfg.get("CACHE_PATH")))
@@ -73,6 +74,9 @@ class Handler:
         if is_shell_role or is_code_role or is_dsc_shell_role:
             functions = None
 
+        completion_content = []  # List to accumulate content
+
+
         for chunk in self.client.chat.completions.create(
             model=model,
             temperature=temperature,
@@ -81,18 +85,27 @@ class Handler:
             functions=functions,  # type: ignore
             stream=True,
         ):
-            delta = chunk.choices[0].delta  # type: ignore
+            
+            if sgpt.handlers.shared_state.stop_generation:
+                yield "^C"
+                sgpt.handlers.shared_state.stop_generation = False  # Ensure the stop message is appended only once
+                break  # Important to break after yielding the stop message to end the generation
+
+            
+            delta = chunk.choices[0].delta
+
+            # Handling function calls within the content
             if delta.function_call:
                 if delta.function_call.name:
                     name = delta.function_call.name
                 if delta.function_call.arguments:
                     arguments += delta.function_call.arguments
-            if chunk.choices[0].finish_reason == "function_call":  # type: ignore
+
+            # If the finish reason is a function call, handle it
+            if chunk.choices[0].finish_reason == "function_call":
                 yield from self.handle_function_call(messages, name, arguments)
-                yield from self.get_completion(
-                    model, temperature, top_p, messages, functions, caching=False
-                )
-                return
+                # Note: If get_completion is called recursively, ensure it respects the stop_generation flag
+                continue
 
             yield delta.content or ""
 
